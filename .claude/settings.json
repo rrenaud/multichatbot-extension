@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "allow": ["Bash(askall ask:*)", "Bash(askall status:*)", "Bash(askall doctor:*)"]
+  }
+}

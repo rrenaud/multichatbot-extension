@@ -61,3 +61,21 @@ S.extract(k, S.newestNode(k, S.SITES[k].assistant.map(()=>0))).text   // last an
 - [ ] `askall status` shows `extension_connected: true` within ~30 s of `askall serve` starting.
 - [ ] `askall doctor` passes for chatgpt and gemini (and claude if you use it).
 - [ ] Acceptance tests 1–7 in IMPLEMENTATION.md §4 against the real sites.
+
+## Not covered by the mock tests (verify in real Chrome)
+- [ ] **Long jobs and SW lifetime**: a >5 min thinking answer (acceptance test 3). The SW stays alive
+      through the 20 s WS pings and the 2 s tab ticks. Confirm the result still arrives, and if the
+      WS drops mid-job, that the buffered result is flushed after the reconnect.
+- [ ] **Hidden/background tabs**: the headless tests' pages are never throttled. Leave the tabs in
+      the background for >5 min before asking (intensive throttling) and check completion is detected
+      promptly (the 2 s ticks from the SW should cover it).
+- [ ] **`--activate` with several sites in one window**: tabs get activated one after another, so only
+      the last stays focused. If a site needs to stay visible while streaming, give each bot its own window.
+- [ ] **Login walls / Cloudflare / "new model" interstitials**: these show up as `input_not_found`
+      (stage `fill`) or `content_script_unavailable` (stage `setup`).
+- [ ] **Stock MultiChatbot popup UI** still sends normally (the e2e tests only call the same
+      `focusAndFill` message the popup uses, not the popup itself).
+- [ ] **New chat per ask** (default): the bridge navigates the remembered tab to the new-chat URL. If you
+      were reading a conversation in that tab, it gets navigated away (use a dedicated tab/window).
+- [ ] The extension's errors page may list "WebSocket connection failed" while the daemon isn't
+      running. That's expected noise from the reconnect loop.

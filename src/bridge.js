@@ -154,7 +154,13 @@ async function runSite(id, site, prompt, opts) {
     send({ type: "progress", id, site, state: "tab" });
 
     // 2. make sure our content script is there (re-inject into tabs from before a reload)
-    if (!(await ensureContentScript(tab.id))) return fail("content_script_unavailable", "setup", { url: tab.url });
+    if (!(await ensureContentScript(tab.id))) {
+        const cur = await chrome.tabs.get(tab.id).catch(() => tab);
+        return fail("content_script_unavailable", "setup", {
+            url: cur.url || cur.pendingUrl || "",
+            detail: "tab did not answer and re-injection failed (error page? login wall? captcha?)",
+        });
+    }
 
     if (opts.activate) {
         await chrome.tabs.update(tab.id, { active: true }).catch(() => {});

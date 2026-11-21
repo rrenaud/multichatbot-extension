@@ -1,3 +1,5 @@
+> **askall fork:** this fork adds a local bridge so you can query your ChatGPT/Gemini tabs from the CLI and Claude Code. See [ASKALL.md](ASKALL.md) (setup), [IMPLEMENTATION.md](IMPLEMENTATION.md) (design), [TODO-LIVE.md](TODO-LIVE.md) (what's unverified on the live sites).
+
 # MultiChatbot Chrome Extension
 
 <div align="center">
