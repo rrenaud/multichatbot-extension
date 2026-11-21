@@ -32,7 +32,7 @@
                 "https://poe.com/*",
                 "https://grok.com/*"
             ],
-            "js": ["src/content.js"],
+            "js": ["src/scrapers.js", "src/content.js"],
             "run_at": "document_idle"
         }
     ],

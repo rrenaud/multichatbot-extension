@@ -1,0 +1,13 @@
+{
+  "name": "askall-multichatbot",
+  "private": true,
+  "description": "Dev tooling only (the extension itself has no build step).",
+  "scripts": {
+    "test": "node test/e2e.js && python3 -m unittest discover -s host/tests -v",
+    "test:e2e": "node test/e2e.js",
+    "test:py": "python3 -m unittest discover -s host/tests -v"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

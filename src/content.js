@@ -16,7 +16,7 @@
  * This file also includes utility functions for handling text fields, buttons, and simulating key presses.
  */
 
-const DEVMODE = false; // False for production, true for development
+const DEVMODE = true; // askall fork: logging on so selector drift is debuggable (set false to silence)
 
 if (!DEVMODE) {
     console.log = function() {};
@@ -46,6 +46,14 @@ if (window.__contentScriptLoaded) {
         "grok.com": handleGrokCom,
         "copilot.microsoft.com": handleMicrosoftCopilot,
     };
+
+    // askall: selectors for chatgpt/gemini/claude live in src/scrapers.js (one place to edit).
+    const SCRAPERS = window.__mcbScrapers;
+    function siteSelectors(siteKey, kind) {
+        const list = SCRAPERS && SCRAPERS.SITES[siteKey] && SCRAPERS.SITES[siteKey][kind];
+        if (!list) throw new Error(`Unexpected error: scrapers.js not loaded (no ${siteKey}.${kind} selectors).`);
+        return list;
+    }
 
     //SECTION - Utility functions for handlers
     /**
@@ -141,12 +149,7 @@ if (window.__contentScriptLoaded) {
                 success = true; // Assume success with direct assignment
             }
         } else if (element.isContentEditable) {
-            element.innerHTML = ""; // Clear previous content
-            element.textContent = preparedText;
-            console.log(
-                "[content.js] Set text using element.textContent (for contenteditable)."
-            );
-            success = true;
+            success = fillContentEditable(element, preparedText);
         } else {
             try {
                 element.textContent = preparedText;
@@ -184,6 +187,76 @@ if (window.__contentScriptLoaded) {
             throw new Error("Unexpected error: Failed to set text value for current site.");
         }
         return success;
+    }
+
+    /**
+     * FUNC - Fills a rich-text editor (ProseMirror on ChatGPT/Claude, Quill on Gemini).
+     * Setting textContent directly loses newlines and can desync the editor's internal
+     * model, so try in order:
+     *   1. a synthetic `paste` event (editors handle it and keep line breaks),
+     *   2. document.execCommand("insertText"),
+     *   3. the original textContent assignment.
+     * Each attempt is verified by checking the editor now contains the text.
+     * @param {HTMLElement} element
+     * @param {string} text
+     * @returns {boolean}
+     */
+    function fillContentEditable(element, text) {
+        const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+        const want = norm(text);
+        const probe = want.slice(0, 40);
+        const filled = () => probe === "" || norm(element.innerText).includes(probe);
+
+        const selectAll = () => {
+            element.focus();
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        };
+
+        // 1. paste
+        try {
+            selectAll();
+            const dt = new DataTransfer();
+            dt.setData("text/plain", text);
+            const ev = new ClipboardEvent("paste", {
+                clipboardData: dt,
+                bubbles: true,
+                cancelable: true,
+            });
+            element.dispatchEvent(ev);
+            if (ev.defaultPrevented && filled()) {
+                console.log("[content.js] Filled contenteditable via synthetic paste.");
+                return true;
+            }
+        } catch (e) {
+            console.warn("[content.js] paste fill failed", e);
+        }
+
+        // 2. execCommand insertText (multi-line: insert line by line with paragraph breaks)
+        try {
+            selectAll();
+            document.execCommand("delete", false);
+            const lines = text.split("\n");
+            lines.forEach((line, i) => {
+                if (i > 0) document.execCommand("insertParagraph", false);
+                if (line) document.execCommand("insertText", false, line);
+            });
+            if (filled()) {
+                console.log("[content.js] Filled contenteditable via execCommand.");
+                return true;
+            }
+        } catch (e) {
+            console.warn("[content.js] execCommand fill failed", e);
+        }
+
+        // 3. original behaviour
+        element.innerHTML = "";
+        element.textContent = text;
+        console.log("[content.js] Filled contenteditable via textContent (fallback).");
+        return true;
     }
 
     /**
@@ -435,10 +508,7 @@ if (window.__contentScriptLoaded) {
 
     //FUNC - Handler for ChatGPT.com
     async function handleChatGPT(text) {
-        const textFieldSelectors = [
-            'div#prompt-textarea[contenteditable="true"]',
-        ];
-        const input = findTextFieldElement(textFieldSelectors);
+        const input = findTextFieldElement(siteSelectors("chatgpt", "input"));
 
         if (!input) {
             console.error("[content.js][handleChatGPT] Text field not found.");
@@ -452,19 +522,12 @@ if (window.__contentScriptLoaded) {
             return false;
         }
 
-        const chatGPTButtonSelectors = ['button[data-testid="send-button"]'];
-        return await attemptSubmit(input, chatGPTButtonSelectors, true);
+        return await attemptSubmit(input, siteSelectors("chatgpt", "send"), true);
     }
 
     //FUNC - Handler for Claude.ai
     async function handleClaude(text) {
-        const textFieldSelectors = [
-            'div[contenteditable="true"].ProseMirror',
-            'div.ProseMirror[contenteditable="true"]',
-            'div[aria-label="Write your prompt to Claude"][contenteditable="true"]',
-            'div[contenteditable="true"]',
-        ];
-        const input = findTextFieldElement(textFieldSelectors);
+        const input = findTextFieldElement(siteSelectors("claude", "input"));
 
         if (!input) {
             console.error("[content.js][handleClaude] Text field not found.");
@@ -478,15 +541,7 @@ if (window.__contentScriptLoaded) {
             return false;
         }
 
-        const sendButtonSelectors = [
-            'button[aria-label="Send message"]',
-            'button[aria-label="Send Message"]',
-            'button[type="button"][aria-label="Send message"]',
-            'button.rounded-lg svg[viewBox="0 0 256 256"]',
-            "button.bg-accent-main-000",
-        ];
-
-        return await attemptSubmit(input, sendButtonSelectors, true);
+        return await attemptSubmit(input, siteSelectors("claude", "send"), true);
     }
 
     //FUNC - Handler for Abacus.ai (apps.abacus.ai, chatllm)
@@ -601,12 +656,7 @@ if (window.__contentScriptLoaded) {
 
     // FUNC - Handler for Gemini (gemini.google.com)
     async function handleGemini(text) {
-        const textFieldSelectors = [
-            ".ql-editor",
-            '[contenteditable="true"]',
-            '[role="textbox"]',
-        ];
-        const input = findTextFieldElement(textFieldSelectors);
+        const input = findTextFieldElement(siteSelectors("gemini", "input"));
 
         if (!input) {
             console.error("[content.js][handleGemini] Text field not found.");
@@ -620,9 +670,8 @@ if (window.__contentScriptLoaded) {
             return false;
         }
 
-        // No reliable button selectors for Gemini currently, rely on Enter fallback
-        const geminiButtonSelectors = [];
-        return await attemptSubmit(input, geminiButtonSelectors, true);
+        // Send-button selectors are best guesses (see TODO-LIVE.md); Enter is the fallback.
+        return await attemptSubmit(input, siteSelectors("gemini", "send"), true);
     }
 
     // FUNC - Handler for Grok.com
@@ -729,6 +778,28 @@ if (window.__contentScriptLoaded) {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             console.log("[content.js] Message received:", request);
 
+            // askall actions
+            if (request.action === "ping") {
+                sendResponse({
+                    ok: true,
+                    site: SCRAPERS ? SCRAPERS.siteKeyForHost(location.hostname) : null,
+                    url: location.href,
+                    busy: askallBusy,
+                });
+                return false;
+            }
+            if (request.action === "askall-tick") {
+                if (SCRAPERS) SCRAPERS.tick();
+                sendResponse({ ok: true });
+                return false;
+            }
+            if (request.action === "askAndWait") {
+                askAndWait(request)
+                    .catch((e) => ({ ok: false, error: e.message || String(e), stage: "unknown" }))
+                    .then(sendResponse);
+                return true; // async
+            }
+
             if (request.action !== "focusAndFill") {
                 console.log("[content.js] Unknown action:", request.action);
                 sendResponse({ success: false, error: "Unexpected error: Unknown action received by content script." });
@@ -805,6 +876,74 @@ if (window.__contentScriptLoaded) {
             return true;
         });
     }
+
+    //SECTION - askall: send + wait for the complete response
+    let askallBusy = false;
+
+    function findHandler(url) {
+        const entry = Object.entries(siteHandlers).find(([domain]) => url.includes(domain));
+        return entry ? entry[1] : null;
+    }
+
+    function reportProgress(reqId, state, extra = {}) {
+        if (!reqId) return;
+        try {
+            chrome.runtime.sendMessage({ type: "askall-progress", reqId, state, ...extra }).catch(() => {});
+        } catch (_) { /* extension context gone */ }
+    }
+
+    /**
+     * FUNC - askAndWait: fill + send with the existing site handler, then wait for the
+     * response to finish and scrape it. Never throws; always resolves to a result object:
+     *   { ok:true, text, html, url, ms } | { ok:false, error, stage, partial }
+     * `stage` tells `askall doctor` where it broke: setup | fill | send | start | complete.
+     */
+    async function askAndWait(request) {
+        const t0 = Date.now();
+        const fail = (error, stage, extra = {}) =>
+            ({ ok: false, error, stage, partial: "", url: location.href, ms: Date.now() - t0, ...extra });
+
+        if (!SCRAPERS) return fail("scrapers_not_loaded", "setup");
+        const siteKey = SCRAPERS.siteKeyForHost(location.hostname);
+        if (!siteKey) return fail("site_not_supported", "setup");
+        const handler = findHandler(location.href);
+        if (!handler) return fail("site_not_supported", "setup");
+        if (!request.text) return fail("empty_prompt", "setup");
+        if (askallBusy) return fail("busy", "setup");
+
+        askallBusy = true;
+        try {
+            const D = SCRAPERS.DEFAULTS;
+            const input = await SCRAPERS.waitForSelector(SCRAPERS.SITES[siteKey].input, D.inputWaitMs);
+            if (!input) return fail("input_not_found", "fill");
+
+            // If a previous answer is still streaming, give it a moment to finish.
+            const busyUntil = Date.now() + 15000;
+            while (SCRAPERS.isGenerating(siteKey) && Date.now() < busyUntil) {
+                await new Promise((r) => setTimeout(r, 500));
+            }
+
+            const baseline = SCRAPERS.snapshot(siteKey);
+            try {
+                const sent = await handler(request.text);
+                if (!sent) return fail("send_failed", "send");
+            } catch (e) {
+                const msg = e && e.message ? e.message : String(e);
+                return fail("send_failed", /text field|set text/i.test(msg) ? "fill" : "send", { detail: msg });
+            }
+            reportProgress(request.reqId, "sent", { site: siteKey });
+
+            return await SCRAPERS.waitForResponse(siteKey, baseline, {
+                timeoutMs: request.timeoutMs,
+                quietMs: request.quietMs,
+                startTimeoutMs: request.startTimeoutMs,
+                onProgress: (state) => reportProgress(request.reqId, state, { site: siteKey }),
+            });
+        } finally {
+            askallBusy = false;
+        }
+    }
+    //!SECTION
 
     handleIncomingMessages();
 }
