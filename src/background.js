@@ -9,6 +9,7 @@
  */
 // Stores the ID of the extension window
 import './debug.js';
+import './bridge.js'; // askall: WebSocket bridge to `askall serve`
 let windowId = null;
 
 // Minimum size of the extension window

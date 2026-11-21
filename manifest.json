@@ -1,9 +1,10 @@
 {
     "manifest_version": 3,
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmQRRxShbnfgU8aYhY11q2yVipbR/Xyf9kg9t0D3U0zbn2Y52tn7v7jJ4DDDgtaNriX4IJZRhmG0YbZJzbJDy6Rpe8hLWdJ4U8fAxIpyzF7iaSlq8lmHGkreKm2L2eLzZS76Ju1NAsqDVmfHQpGRxzYo6dWgVQyHxZmU9iDLXvPxloQzzCCuJ+nE8oBZrZKlHAwokT9nmYjlPUQnAElU/XlyYrzBQhiI0rrI4+K4I2ROPPMOj2/xNhLk9Y2lq5cVpB6fVBNOPvPyOcnwAcdrRZ2aBT0LpNTyr8SV4OOdWZkyFBY3KqLw2hqkm3StWkd0C3++nOHk033m5x52pgWGLgwIDAQAB",
     "name": "MultiChatbot",
     "version": "1.0.1",
     "description": "Free and open-source Chrome extension to chat with multiple AIs (ChatGPT, Gemini, Claude & more) from one text box.",
-    "permissions": ["activeTab", "storage", "tabs", "windows"],
+    "permissions": ["activeTab", "storage", "tabs", "windows", "alarms", "scripting"],
     "host_permissions": [
         "https://gemini.google.com/*",
         "https://aistudio.google.com/*",

@@ -56,7 +56,7 @@ S.extract(k, S.newestNode(k, S.SITES[k].assistant.map(()=>0))).text   // last an
       activates each tab before sending) or give each bot its own non-minimized window.
 
 ## M2/M3: bridge + daemon (tested here against mocks; verify in your browser)
-- [ ] Load the unpacked extension. Its ID must be `ebkhgplmgnnfbgifnipmkhlegdbifnhh`
+- [ ] Load the unpacked extension. Its ID must be `memcomanbbccgomhdecjgcnhihgiaepb`
       (pinned by `"key"` in manifest.json). If it differs, run with `ASKALL_EXT_ID=<id>`.
 - [ ] `askall status` shows `extension_connected: true` within ~30 s of `askall serve` starting.
 - [ ] `askall doctor` passes for chatgpt and gemini (and claude if you use it).
