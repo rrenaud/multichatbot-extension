@@ -54,6 +54,7 @@
     "content_security_policy": {
         "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' https: data:;"
     },
+    "omnibox": { "keyword": "ask" },
     "background": {
         "service_worker": "src/background.js",
         "type": "module"

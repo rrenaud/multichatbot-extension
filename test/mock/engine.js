@@ -92,6 +92,15 @@
     const m = prompt.match(/Reply with exactly (\S+)/);
     if (m) html = "<p>" + esc(m[1]) + "</p>";
     else if (/LONG/.test(prompt)) html = longHtml();
+    else if (/MATH/.test(prompt)) {
+      // KaTeX-shaped markup; claude.ai's TeX annotations end in a newline
+      const k = (tex) => '<span class="katex"><span class="katex-mathml"><math><semantics><mrow></mrow>' +
+        '<annotation encoding="application/x-tex">' + tex + '</annotation></semantics></math></span>' +
+        '<span class="katex-html" aria-hidden="true">RENDERED</span></span>';
+      html = '<p>Inline ' + k("a^2+b^2=c^2\n") + ' here.</p>' +
+        '<span class="katex-display">' + k("\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}") + '</span>' +
+        '<p>Prices: $5 and $10.</p><pre><code>echo "$HOME is $USER"</code></pre>';
+    }
     else if (/ECHO/.test(prompt)) html = "<p>" + prompt.split("\n").map(esc).join("<br>") + "</p>";
     else html = "<p>mock answer</p>";
 

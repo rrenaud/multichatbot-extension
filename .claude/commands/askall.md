@@ -1,5 +1,5 @@
 ---
-description: Ask ChatGPT + Gemini (via browser) and synthesize with your own answer
+description: Ask ChatGPT, Gemini + Claude (via browser) and synthesize with your own answer
 argument-hint: <question>
 allowed-tools: Bash(askall ask:*)
 ---

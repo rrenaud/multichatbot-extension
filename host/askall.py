@@ -2,7 +2,7 @@
 """askall: ask your logged-in ChatGPT / Gemini / Claude browser tabs from the command line.
 
     askall serve  [--port 47821] [--ext-id ID]   # daemon the extension connects to
-    askall ask "prompt" [--sites chatgpt,gemini] [--continue] [--timeout 600]
+    askall ask "prompt" [--sites chatgpt,gemini,claude] [--continue] [--timeout 600]
                         [--format json|md] [--stdin] [--activate] [--html] [-v]
     askall status                                # is the daemon up / extension connected?
     askall doctor [--sites ...]                  # PONG test per site, reports failing stage
@@ -41,7 +41,7 @@ DEFAULT_PORT = int(os.environ.get("ASKALL_PORT", "47821"))
 # Pinned via the "key" in manifest.json. Override with ASKALL_EXT_ID or --ext-id
 # (comma-separated list allowed; "any" accepts any chrome-extension:// origin, for dev only).
 DEFAULT_EXT_ID = "memcomanbbccgomhdecjgcnhihgiaepb"
-DEFAULT_SITES = os.environ.get("ASKALL_SITES", "chatgpt,gemini")
+DEFAULT_SITES = os.environ.get("ASKALL_SITES", "chatgpt,gemini,claude")
 EXT_WAIT_S = 35.0  # one reconnect-alarm cycle (30 s) + slack
 MAX_MSG = 64 * 1024 * 1024
 
@@ -148,6 +148,15 @@ class Daemon:
                 elif t == "stop":
                     await self._safe_send(ws, json.dumps({"type": "stopping"}))
                     self.stopping.set()
+                elif t == "reload":
+                    ok = False
+                    if self.ext is not None:
+                        try:
+                            await self.ext.send(json.dumps({"type": "reload"}))
+                            ok = True
+                        except ConnectionClosed:
+                            pass
+                    await self._safe_send(ws, json.dumps({"type": "reloading", "ok": ok}))
                 else:
                     await self._safe_send(ws, json.dumps({"type": "error", "error": f"unknown type {t!r}"}))
         except ConnectionClosed:
@@ -404,6 +413,19 @@ def cmd_status(args) -> int:
     return 0 if st.get("extension_connected") else 1
 
 
+def cmd_reload(args) -> int:
+    try:
+        r = asyncio.run(simple_request(args.port, {"type": "reload"}))
+    except DaemonUnavailable:
+        print("askall: no daemon running")
+        return 1
+    if not r.get("ok"):
+        print("askall: extension not connected")
+        return 1
+    print("askall: extension reloading (reconnects in a few seconds)")
+    return 0
+
+
 def cmd_stop(args) -> int:
     try:
         asyncio.run(simple_request(args.port, {"type": "stop"}))
@@ -486,6 +508,7 @@ def main(argv=None) -> int:
 
     add("status", help="daemon / extension status").set_defaults(fn=cmd_status)
     add("stop", help="stop the daemon").set_defaults(fn=cmd_stop)
+    add("reload", help="reload the unpacked extension (after editing its files)").set_defaults(fn=cmd_reload)
 
     dp = add("doctor", help="PONG test per site")
     dp.add_argument("--sites", default=DEFAULT_SITES)

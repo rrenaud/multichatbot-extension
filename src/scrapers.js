@@ -24,17 +24,26 @@
             input: [
                 'div#prompt-textarea[contenteditable="true"]',
                 "#prompt-textarea",
+                // Nov 2026 composer: no id, ProseMirror with data-composer-markdown
+                'form div.ProseMirror[contenteditable="true"][data-composer-markdown]',
+                'form div.ProseMirror[contenteditable="true"]',
             ],
             send: [
                 'button[data-testid="send-button"]',
                 "button#composer-submit-button",
+                'form button[aria-label="Send"]',
+                'form button[aria-label="Send prompt"]',
             ],
             // response
-            assistant: ['[data-message-author-role="assistant"]'],
-            content: [".markdown"], // inside the assistant node; falls back to the node
+            assistant: [
+                '[data-message-author-role="assistant"]',
+                "[data-response-body]", // Nov 2026: role attribute is gone
+            ],
+            content: [".markdown", '[class*="MarkdownRoot"]'], // inside the assistant node; falls back to the node
             generating: [
                 'button[data-testid="stop-button"]',
                 'button[aria-label="Stop streaming"]',
+                'form button[aria-label="Stop"]', // Nov 2026
             ],
             strip: ["button", "svg", ".sr-only"],
         },
@@ -73,13 +82,15 @@
                 'button[aria-label="Send Message"]',
                 "button.bg-accent-main-000",
             ],
-            assistant: [".font-claude-response", "[data-is-streaming]"],
-            content: [],
+            assistant: [".font-claude-response", '[data-testid="assistant-message"]', "[data-is-streaming]"],
+            // Nov 2026: the reply lives in .prose; the row also holds an sr-only "Claude responded"
+            // heading and a <time> stamp, which `strip` removes
+            content: [".prose", "[data-transcript-engine-root]"],
             generating: [
                 '[data-is-streaming="true"]',
                 'button[aria-label="Stop response"]',
             ],
-            strip: ["button", "svg"],
+            strip: ["button", "svg", ".sr-only", "time"],
         },
     };
 
@@ -182,7 +193,7 @@
      * Wait for the response that follows a send, per IMPLEMENTATION.md §M1.
      * @param {string} siteKey
      * @param {number[]} baseline - from snapshot() taken before sending
-     * @param {object} [opts] - { timeoutMs, quietMs, startTimeoutMs, onProgress(state) }
+     * @param {object} [opts] - { timeoutMs, quietMs, startTimeoutMs, onProgress(state), onPartial(text) }
      */
     function waitForResponse(siteKey, baseline, opts = {}) {
         const timeoutMs = opts.timeoutMs || DEFAULTS.timeoutMs;
@@ -197,6 +208,7 @@
             let lastChange = Date.now();
             let started = false;
             let done = false;
+            let lastPartial = 0;
 
             const finish = (r) => {
                 if (done) return;
@@ -234,6 +246,11 @@
                 if (text !== lastText) {
                     lastText = text;
                     lastChange = now;
+                    // live preview for the in-browser UI, at most every 400 ms
+                    if (opts.onPartial && text.trim() && now - lastPartial >= 400) {
+                        lastPartial = now;
+                        opts.onPartial(text);
+                    }
                 }
                 const generating = isGenerating(siteKey);
                 if (!generating && text.trim() && now - lastChange >= quietMs) {
@@ -295,7 +312,10 @@
         // KaTeX: prefer the TeX source over the doubled MathML/HTML rendering
         if (n.classList && n.classList.contains("katex")) {
             const ann = n.querySelector('annotation[encoding="application/x-tex"]');
-            if (ann) return n.closest(".katex-display") ? "\n\n$$" + ann.textContent + "$$\n\n" : "$" + ann.textContent + "$";
+            if (ann) {
+                const tex = ann.textContent.trim(); // claude.ai's annotations end in "\n"
+                return n.closest(".katex-display") ? "\n\n$$" + tex + "$$\n\n" : "$" + tex + "$";
+            }
         }
 
         switch (tag) {

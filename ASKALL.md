@@ -42,13 +42,23 @@ askall ask "Reply with exactly PONG-$RANDOM" --format md
 ```
 
 `askall ask` options: `--sites chatgpt,gemini,claude` (default `$ASKALL_SITES` or
-`chatgpt,gemini`), `--continue` (follow up in the same conversations), `--timeout 600`
+`chatgpt,gemini,claude`), `--continue` (follow up in the same conversations), `--timeout 600`
 (seconds, per site), `--format json|md`, `--stdin`, `--activate` (focus each tab before
 sending, for sites that stall in background tabs), `--html`, `--no-spawn`, `-v` (progress
 on stderr). Exit code: 0 all ok, 2 some failed, 1 none.
 
 `askall stop` stops the daemon. Use `--port` / `$ASKALL_PORT` for a different port, but note
 the extension side is fixed to 47821 (`PORT` in `src/bridge.js`).
+
+## 3b. In the browser
+
+Type `ask` + <kbd>Space</kbd> in Chrome's address bar, then your question, then <kbd>Enter</kbd>.
+That opens `src/askall/ask.html`: answers side by side, streaming as they're written, with a
+follow-up box (same conversations) and **New chat**. Pick sites with the chips at the top.
+It runs jobs inside the extension, so it works without the daemon.
+
+`askall reload` reloads the unpacked extension after you edit its files (no trip to
+chrome://extensions). The daemon runs as a systemd user service: `~/.config/systemd/user/askall.service`.
 
 ## 4. Claude Code
 
@@ -66,7 +76,8 @@ and add `"Bash(askall ask:*)"` to `permissions.allow` in `~/.claude/settings.jso
 |---|---|
 | `src/scrapers.js` | **all askall selectors** (`SITES`), completion detection, HTML→markdown |
 | `src/content.js` | site handlers (fill + send), `ping` / `askAndWait` / `askall-tick` actions |
-| `src/bridge.js` | service-worker WebSocket client, job runner, tab management, re-injection |
+| `src/bridge.js` | service-worker WebSocket client, job runner, tab management, re-injection, `ask` omnibox keyword |
+| `src/askall/` | the in-browser ask page (`ask.html`/`.js`/`.css`, vendored `marked`) |
 | `host/askall.py` | `serve` / `ask` / `status` / `doctor` / `stop` |
 | `test/e2e.js` + `test/mock/` | Playwright e2e: real Chromium + extension + daemon + CLI against **mock** sites |
 | `host/tests/` | daemon/CLI unit tests with a fake extension |

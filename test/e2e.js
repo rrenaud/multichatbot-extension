@@ -2,7 +2,7 @@
 // End-to-end tests: real Chromium + the unpacked extension + MOCK chatbot sites.
 //
 //   node test/e2e.js            # all suites
-//   node test/e2e.js m1         # just one suite (m0 | m1 | bridge)
+//   node test/e2e.js m1         # just one suite (m0 | m1 | bridge | ui)
 //
 // Requires `playwright` (npm i -D playwright && npx playwright install chromium).
 // The mocks live in test/mock/. They only prove the pipeline works against the DOM
@@ -334,7 +334,91 @@ async function suiteBridge(env) {
 }
 
 // ---------------------------------------------------------------------------
-const SUITES = { m0: suiteM0, m1: suiteM1, bridge: suiteBridge };
+// ui suite: the in-browser ask page (src/askall/ask.html), as opened by the `ask` omnibox
+// keyword. Talks to the service worker over a port, so it needs no daemon.
+async function suiteUi({ ctx, extId }) {
+  const SHOT = process.env.ASKALL_UI_SHOT;
+  const n = "UI-" + nonce();
+  const page = await ctx.newPage();
+  const doneAll = (count) => page.waitForFunction((c) => {
+    const st = [...document.querySelectorAll(".card .status")];
+    return st.length === c && st.every((e) => !e.classList.contains("busy"));
+  }, count, { timeout: 60000 });
+  const userMsgs = async (site) => {
+    const tab = ctx.pages().find((p) => p.url().startsWith(HOSTS[site]));
+    return tab ? tab.locator(".user-msg").count() : -1;
+  };
+
+  await test("ui ?q= asks chatgpt + gemini and renders both answers", async () => {
+    await page.goto(`chrome-extension://${extId}/src/askall/ask.html?q=` + encodeURIComponent(`Reply with exactly ${n}`));
+    await doneAll(3);
+    const cards = await page.$$eval(".card", (cs) => cs.map((c) => ({
+      site: c.dataset.site, status: c.querySelector(".status").textContent, body: c.querySelector(".body").textContent.trim(),
+    })));
+    assert(cards.map((c) => c.site).join() === "chatgpt,gemini,claude", JSON.stringify(cards));
+    for (const c of cards) assert(c.body === n && c.status.startsWith("done"), JSON.stringify(c));
+    assert(!page.url().includes("?q="), "q should be dropped from the URL: " + page.url());
+  });
+
+  await test("ui follow-up streams partial text, continues same conversation, renders markdown", async () => {
+    await page.fill("#input", "LONG please");
+    await page.press("#input", "Enter");
+    // a partial answer shows up while the card is still busy
+    await page.waitForFunction(() => {
+      const c = document.querySelectorAll(".turn")[1]?.querySelector('.card[data-site="chatgpt"]');
+      return c && c.querySelector(".status.busy") && /Paragraph/.test(c.querySelector(".body").textContent);
+    }, null, { timeout: 30000 });
+    await doneAll(6);
+    const t = await page.evaluate(() => {
+      const b = document.querySelectorAll(".turn")[1].querySelector(".card[data-site=chatgpt] .body");
+      return { text: b.textContent, table: !!b.querySelector("table"), pre: !!b.querySelector("pre code"), h2: !!b.querySelector("h2") };
+    });
+    assert(t.text.includes("END-OF-LONG") && t.table && t.pre && t.h2, JSON.stringify({ ...t, text: t.text.slice(-80) }));
+    assert(await userMsgs("chatgpt") === 2, "chatgpt tab should hold both prompts (same conversation)");
+  });
+
+  await test("ui renders LaTeX with KaTeX, leaves prices and code alone", async () => {
+    await page.fill("#input", "MATH please");
+    await page.press("#input", "Enter");
+    await doneAll(9);
+    const r = await page.evaluate(() => {
+      const b = document.querySelectorAll(".turn")[2].querySelector(".card[data-site=claude] .body");
+      return {
+        katex: b.querySelectorAll(".katex").length,
+        display: b.querySelectorAll(".math-display .katex-display").length,
+        tex: [...b.querySelectorAll('annotation[encoding="application/x-tex"]')].map((a) => a.textContent),
+        prices: b.textContent.includes("Prices: $5 and $10."),
+        code: b.querySelector("pre code")?.textContent.trim(),
+        errors: b.querySelectorAll(".katex-error").length,
+      };
+    });
+    assert(r.katex === 2 && r.display === 1 && r.errors === 0 && r.prices && r.code === 'echo "$HOME is $USER"' &&
+      r.tex[0] === "a^2+b^2=c^2", JSON.stringify(r));
+    if (SHOT) {
+      await page.evaluate(() => document.querySelectorAll(".turn")[2].scrollIntoView());
+      await page.screenshot({ path: SHOT });
+    }
+  });
+
+  await test("ui reload keeps the thread and does not re-ask", async () => {
+    await page.reload();
+    await page.waitForSelector(".turn");
+    assert(await page.locator(".turn").count() === 3, "turns after reload");
+    await page.waitForTimeout(1500);
+    assert(await userMsgs("chatgpt") === 3, "reload re-sent a prompt");
+  });
+
+  await test("ui New chat starts fresh conversations", async () => {
+    await page.click("#newChat");
+    assert(await page.locator(".turn").count() === 0, "thread not cleared");
+    await page.fill("#input", "Reply with exactly AGAIN");
+    await page.press("#input", "Enter");
+    await doneAll(3);
+    assert(await userMsgs("chatgpt") === 1, "chatgpt tab should be a new chat with one prompt");
+  });
+}
+
+const SUITES = { m0: suiteM0, m1: suiteM1, bridge: suiteBridge, ui: suiteUi };
 module.exports = { SUITES, launch, openSite, askVia, test, assert, nonce, HOSTS, NEWCHAT, EXT };
 
 async function main() {

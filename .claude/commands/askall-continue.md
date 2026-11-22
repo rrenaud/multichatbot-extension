@@ -1,5 +1,5 @@
 ---
-description: Follow-up question in the same ChatGPT + Gemini conversations, then synthesize
+description: Follow-up question in the same ChatGPT, Gemini + Claude conversations, then synthesize
 argument-hint: <follow-up>
 allowed-tools: Bash(askall ask:*)
 ---

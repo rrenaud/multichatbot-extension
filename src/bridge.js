@@ -18,7 +18,7 @@ const WS_URL = `ws://127.0.0.1:${PORT}/ext`;
 const LOG = "[askall bridge]";
 
 let ws = null;
-const inflight = new Map(); // reqId -> { id, site, tabId }
+const inflight = new Map(); // reqId -> { id, site, tabId, emit }
 const siteQueues = {}; // site -> promise chain (one prompt at a time per site)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -72,14 +72,23 @@ chrome.runtime.onInstalled.addListener(connect);
 connect();
 //!SECTION
 
-// Progress events from content scripts → daemon
+// Progress events from content scripts → whoever started the job (daemon or the ask page)
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "askall-progress" && inflight.has(msg.reqId)) {
-        const { id, site } = inflight.get(msg.reqId);
-        send({ type: "progress", id, site, state: msg.state });
+        const { id, site, tabId, emit } = inflight.get(msg.reqId);
+        emit({ type: "progress", id, site, state: msg.state, text: msg.text, tabId });
     }
     return false;
 });
+
+/** Daemon sink: buffered across reconnects; live partial text is only for the ask page. */
+function daemonEmit(obj, opts) {
+    if (obj.type === "progress") {
+        if (obj.state === "partial") return false;
+        obj = { type: obj.type, id: obj.id, site: obj.site, state: obj.state };
+    }
+    return send(obj, opts);
+}
 
 // Timers inside hidden tabs get throttled (down to 1/min after 5 min hidden); extension
 // messages are not. While jobs run, nudge the waiting content scripts every 2 s.
@@ -90,18 +99,63 @@ setInterval(() => {
 }, 2000);
 
 function handle(msg) {
+    if (msg.type === "reload") {
+        // dev convenience (`askall reload`): pick up edited extension files without chrome://extensions
+        setTimeout(() => chrome.runtime.reload(), 100);
+        return;
+    }
     if (msg.type === "ask") {
-        runJob(msg).catch((e) => {
+        runJob(msg, daemonEmit).catch((e) => {
             console.error(LOG, "job crashed", e);
-            send({ type: "result", id: msg.id, error: "bridge_error: " + (e && e.message) }, { buffer: true });
+            daemonEmit({ type: "result", id: msg.id, error: "bridge_error: " + (e && e.message) }, { buffer: true });
         });
     }
 }
 
+// SECTION - in-browser UI: `ask <question>` in the address bar → src/askall/ask.html
+const ASK_PAGE = "src/askall/ask.html";
+
+chrome.omnibox.setDefaultSuggestion({ description: "Ask ChatGPT, Gemini + Claude (askall)" });
+chrome.omnibox.onInputEntered.addListener(async (text, disposition) => {
+    const q = text.trim();
+    const url = chrome.runtime.getURL(ASK_PAGE) + (q ? "?q=" + encodeURIComponent(q) : "");
+    if (disposition === "currentTab") {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) return chrome.tabs.update(tab.id, { url });
+    }
+    chrome.tabs.create({ url, active: disposition !== "newBackgroundTab" });
+});
+
+// The ask page talks to us over a long-lived port:
+//   page → sw  {type:"ask", id, prompt, sites, newChat} | {type:"ping"} | {type:"focus", tabId}
+//   sw → page  {type:"progress", id, site, state, text?, tabId} | {type:"result", id, results}
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== "askall-ui") return;
+    let open = true;
+    port.onDisconnect.addListener(() => { open = false; });
+    const emit = (obj) => {
+        if (!open) return false;
+        try { port.postMessage(obj); return true; } catch (_) { return false; }
+    };
+    port.onMessage.addListener((msg) => {
+        if (msg.type === "ask") {
+            runJob({ ...msg, timeoutMs: msg.timeoutMs || 600000 }, emit).catch((e) =>
+                emit({ type: "result", id: msg.id, error: "bridge_error: " + (e && e.message) }));
+        } else if (msg.type === "focus" && msg.tabId) {
+            chrome.tabs.update(msg.tabId, { active: true })
+                .then((t) => chrome.windows.update(t.windowId, { focused: true }))
+                .catch(() => {});
+        }
+        // "ping" just keeps the service worker awake while answers stream in
+    });
+});
+//!SECTION
+
 // SECTION - jobs
-async function runJob(job) {
+/** emit(obj, {buffer}) receives progress + the final result. */
+async function runJob(job, emit) {
     const { id, prompt } = job;
-    const sites = job.sites && job.sites.length ? job.sites : ["chatgpt", "gemini"];
+    const sites = job.sites && job.sites.length ? job.sites : ["chatgpt", "gemini", "claude"];
     const opts = {
         newChat: job.newChat !== false,
         timeoutMs: job.timeoutMs || S.DEFAULTS.timeoutMs,
@@ -110,7 +164,7 @@ async function runJob(job) {
     console.log(LOG, "job", id, sites, opts);
 
     const settled = await Promise.allSettled(
-        sites.map((site) => enqueue(site, () => runSite(id, site, prompt, opts)))
+        sites.map((site) => enqueue(site, () => runSite(id, site, prompt, opts, emit)))
     );
     const results = {};
     sites.forEach((site, i) => {
@@ -119,7 +173,7 @@ async function runJob(job) {
             ? s.value
             : { ok: false, error: "bridge_error", detail: String((s.reason && s.reason.message) || s.reason), stage: "bridge", partial: "" };
     });
-    send({ type: "result", id, results }, { buffer: true });
+    emit({ type: "result", id, results }, { buffer: true });
 }
 
 /** Serialize work per site: a content script handles one prompt at a time. */
@@ -130,7 +184,7 @@ function enqueue(site, fn) {
     return next;
 }
 
-async function runSite(id, site, prompt, opts) {
+async function runSite(id, site, prompt, opts, emit) {
     const cfg = S.SITES[site];
     const fail = (error, stage, extra = {}) => ({ ok: false, error, stage, partial: "", ...extra });
     if (!cfg) return fail("unknown_site", "setup", { detail: `known: ${Object.keys(S.SITES).join(", ")}` });
@@ -151,7 +205,7 @@ async function runSite(id, site, prompt, opts) {
         await loaded.forTab(tab.id);
     }
     await rememberTab(site, tab.id);
-    send({ type: "progress", id, site, state: "tab" });
+    emit({ type: "progress", id, site, state: "tab", tabId: tab.id });
 
     // 2. make sure our content script is there (re-inject into tabs from before a reload)
     if (!(await ensureContentScript(tab.id))) {
@@ -169,14 +223,14 @@ async function runSite(id, site, prompt, opts) {
 
     // 3. ask and wait
     const reqId = `${id}:${site}`;
-    inflight.set(reqId, { id, site, tabId: tab.id });
+    inflight.set(reqId, { id, site, tabId: tab.id, emit });
     try {
         const guard = sleep(opts.timeoutMs + 90000).then(() => fail("timeout", "bridge"));
         const r = await Promise.race([
             chrome.tabs.sendMessage(tab.id, { action: "askAndWait", text: prompt, timeoutMs: opts.timeoutMs, reqId }),
             guard,
         ]);
-        send({ type: "progress", id, site, state: "done" });
+        emit({ type: "progress", id, site, state: "done", tabId: tab.id });
         return r || fail("no_response_from_tab", "bridge");
     } catch (e) {
         // e.g. tab closed or did a full navigation mid-answer

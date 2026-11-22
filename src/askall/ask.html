@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>askall</title>
+    <link rel="icon" href="../../icons/icon32.png">
+    <link rel="stylesheet" href="vendor/katex/katex.min.css">
+    <link rel="stylesheet" href="ask.css">
+</head>
+<body>
+    <header class="top">
+        <div class="brand">askall</div>
+        <div id="sites" class="sites" role="group" aria-label="Sites to ask"></div>
+        <button id="newChat" class="ghost" title="Start fresh conversations on every site">New chat</button>
+    </header>
+
+    <main id="thread" class="thread">
+        <section id="empty" class="empty">
+            <h1>Ask every chatbot at once</h1>
+            <p>Type below, or from any tab's address bar type <kbd>ask</kbd> <kbd>Space</kbd> then your question.</p>
+            <p class="hint">Answers come from your logged-in tabs. Follow-ups stay in the same conversations until you press <em>New chat</em>.</p>
+        </section>
+    </main>
+
+    <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Ask ChatGPT, Gemini and Claude…" autofocus></textarea>
+        <button id="send" type="submit">Ask</button>
+    </form>
+
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/katex/katex.min.js"></script>
+    <script src="../scrapers.js"></script>
+    <script src="ask.js"></script>
+</body>
+</html>

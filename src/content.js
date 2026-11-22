@@ -938,6 +938,7 @@ if (window.__contentScriptLoaded) {
                 quietMs: request.quietMs,
                 startTimeoutMs: request.startTimeoutMs,
                 onProgress: (state) => reportProgress(request.reqId, state, { site: siteKey }),
+                onPartial: (text) => reportProgress(request.reqId, "partial", { site: siteKey, text }),
             });
         } finally {
             askallBusy = false;
