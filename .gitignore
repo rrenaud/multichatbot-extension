@@ -93,3 +93,6 @@ report/
 test-results/
 
 # Project specific
+
+# askall page: vendored browser libs (marked, KaTeX) must be committed
+!src/askall/vendor/
