@@ -5,7 +5,7 @@
 (function () {
   const SITE = document.documentElement.dataset.site;
   const $ = (s) => document.querySelector(s);
-  const editor = $("[contenteditable]");
+  const editor = [...document.querySelectorAll("[contenteditable]")].find((e) => !e.classList.contains("dead"));
   const thread = $("#thread");
   let sendBtn = $("#send");
   const stopBtn = $("#stop");
@@ -92,6 +92,7 @@
     const m = prompt.match(/Reply with exactly (\S+)/);
     if (m) html = "<p>" + esc(m[1]) + "</p>";
     else if (/LONG/.test(prompt)) html = longHtml();
+    else if (/LINGER/.test(prompt)) html = "<p>" + "streaming words ".repeat(60) + "</p><p>FINAL-TAIL</p>";
     else if (/MATH/.test(prompt)) {
       // KaTeX-shaped markup; claude.ai's TeX annotations end in a newline
       const k = (tex) => '<span class="katex"><span class="katex-mathml"><math><semantics><mrow></mrow>' +
@@ -122,6 +123,7 @@
       await sleep(3500);
       content.innerHTML += "<p>AFTER-PAUSE</p>";
     }
+    if (/LINGER/.test(prompt)) await sleep(8000); // text is done but the stop button stays up (Gemini does this)
     if (SITE === "claude") wrap.setAttribute("data-is-streaming", "false");
     setGenerating(false);
   }

@@ -4,6 +4,10 @@ const shell = (site, composer) => `<!doctype html><html data-site="${site}"><hea
 
 module.exports = {
   chatgpt: shell("chatgpt", `
+    <!-- real ChatGPT (Nov 2026) keeps the new-chat composer, hidden, before the live one -->
+    <div style="display:none"><form onsubmit="return false">
+      <div id="prompt-textarea" class="dead" contenteditable="true"></div>
+    </form></div>
     <form onsubmit="return false">
       <div id="prompt-textarea" contenteditable="true"></div>
       <button id="send" type="button" data-testid="send-button">Send</button>

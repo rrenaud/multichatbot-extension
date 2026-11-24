@@ -67,6 +67,11 @@ if (window.__contentScriptLoaded) {
             selectors
         );
 
+        // prefer a rendered match (see SCRAPERS.qsFirst: ChatGPT keeps a hidden composer around)
+        if (SCRAPERS && SCRAPERS.qsFirst) {
+            const element = SCRAPERS.qsFirst(selectors);
+            if (element) return element;
+        }
         for (const selector of selectors) {
             const element = document.querySelector(selector);
             if (element) {
@@ -216,9 +221,19 @@ if (window.__contentScriptLoaded) {
             sel.addRange(range);
         };
 
+        // ProseMirror (ChatGPT/Claude) ignores the DOM selection set by selectAll(), so a paste
+        // would be *appended* to any leftover draft. Its own Mod-a keymap does select all.
+        const editorSelectAll = () => {
+            const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+            element.dispatchEvent(new KeyboardEvent("keydown", {
+                key: "a", code: "KeyA", ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true,
+            }));
+        };
+
         // 1. paste
         try {
             selectAll();
+            editorSelectAll();
             const dt = new DataTransfer();
             dt.setData("text/plain", text);
             const ev = new ClipboardEvent("paste", {
@@ -278,6 +293,10 @@ if (window.__contentScriptLoaded) {
         const searchContext =
             container instanceof HTMLElement ? container : document;
 
+        if (SCRAPERS && SCRAPERS.qsFirst) {
+            const element = SCRAPERS.qsFirst(selectors, searchContext);
+            if (element) return element;
+        }
         for (const selector of selectors) {
             // Use the determined searchContext for querySelector
             const element = searchContext.querySelector(selector);
@@ -898,6 +917,25 @@ if (window.__contentScriptLoaded) {
      *   { ok:true, text, html, url, ms } | { ok:false, error, stage, partial }
      * `stage` tells `askall doctor` where it broke: setup | fill | send | start | complete.
      */
+    /** What the page looks like when no answer started: did the prompt leave the composer? */
+    function askallDiag(siteKey, baseline) {
+        const site = SCRAPERS.SITES[siteKey];
+        const q = (sels) => { for (const x of sels) { try { const e = document.querySelector(x); if (e) return { sel: x, e }; } catch (_) { /* skip */ } } return null; };
+        const input = q(site.input), send = q(site.send);
+        return {
+            composer: input ? (input.e.innerText || input.e.value || "").slice(0, 300) : null,
+            inputSel: input && input.sel,
+            sendSel: send && send.sel,
+            sendDisabled: send ? !!send.e.disabled : null,
+            assistantCounts: { baseline, now: SCRAPERS.snapshot(siteKey) },
+            generating: SCRAPERS.isGenerating(siteKey),
+            hidden: document.hidden,
+            formButtons: [...((input && input.e.closest("form")) || document).querySelectorAll("button")]
+                .filter((b) => b.getClientRects().length)
+                .map((b) => `${b.getAttribute("aria-label") || b.textContent.trim().slice(0, 20)}${b.disabled ? " (disabled)" : ""}`),
+        };
+    }
+
     async function askAndWait(request) {
         const t0 = Date.now();
         const fail = (error, stage, extra = {}) =>
@@ -933,13 +971,15 @@ if (window.__contentScriptLoaded) {
             }
             reportProgress(request.reqId, "sent", { site: siteKey });
 
-            return await SCRAPERS.waitForResponse(siteKey, baseline, {
+            const r = await SCRAPERS.waitForResponse(siteKey, baseline, {
                 timeoutMs: request.timeoutMs,
                 quietMs: request.quietMs,
                 startTimeoutMs: request.startTimeoutMs,
                 onProgress: (state) => reportProgress(request.reqId, state, { site: siteKey }),
                 onPartial: (text) => reportProgress(request.reqId, "partial", { site: siteKey, text }),
             });
+            if (!r.ok && r.stage === "start") r.diag = askallDiag(siteKey, baseline);
+            return r;
         } finally {
             askallBusy = false;
         }

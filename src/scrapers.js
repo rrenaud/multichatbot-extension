@@ -111,14 +111,24 @@
     }
 
     // SECTION - DOM helpers (content-script only)
+    /**
+     * First element matching `selectors` (tried in order), preferring ones that are rendered.
+     * ChatGPT (Nov 2026) leaves the new-chat composer in the DOM under a display:none
+     * container after the first message, *before* the live one; plain querySelector picked
+     * the dead one, so follow-ups were typed into an invisible box and never sent.
+     * Falls back to the first hidden match if nothing matching is rendered.
+     */
     function qsFirst(selectors, root = document) {
+        let fallback = null;
         for (const sel of selectors || []) {
-            try {
-                const el = root.querySelector(sel);
-                if (el) return el;
-            } catch (_) { /* bad selector: skip */ }
+            let list;
+            try { list = root.querySelectorAll(sel); } catch (_) { continue; } // bad selector: skip
+            for (const el of list) {
+                if (el.getClientRects().length) return el;
+                if (!fallback) fallback = el;
+            }
         }
-        return null;
+        return fallback;
     }
 
     function qsAllCount(sel) {
@@ -209,6 +219,7 @@
             let started = false;
             let done = false;
             let lastPartial = 0;
+            let lastPartialText = null;
 
             const finish = (r) => {
                 if (done) return;
@@ -246,11 +257,15 @@
                 if (text !== lastText) {
                     lastText = text;
                     lastChange = now;
-                    // live preview for the in-browser UI, at most every 400 ms
-                    if (opts.onPartial && text.trim() && now - lastPartial >= 400) {
-                        lastPartial = now;
-                        opts.onPartial(text);
-                    }
+                }
+                // Live preview for the in-browser UI, at most every 400 ms. Checked on every
+                // pass, not only when the text changes: otherwise a last chunk that lands
+                // < 400 ms after the previous send is never sent, and the preview stays
+                // truncated until completion (which can lag ~20 s on Gemini).
+                if (opts.onPartial && text.trim() && text !== lastPartialText && now - lastPartial >= 400) {
+                    lastPartial = now;
+                    lastPartialText = text;
+                    opts.onPartial(text);
                 }
                 const generating = isGenerating(siteKey);
                 if (!generating && text.trim() && now - lastChange >= quietMs) {

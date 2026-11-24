@@ -400,12 +400,26 @@ async function suiteUi({ ctx, extId }) {
     }
   });
 
+  await test("ui shows the whole answer while the site still says it's generating", async () => {
+    // Regression: the last chunk arrived < 400 ms after the previous partial, was throttled
+    // away, and the card stayed truncated until the final result (Gemini keeps its stop
+    // button up for a while after the text is complete).
+    await page.fill("#input", "LINGER please");
+    await page.press("#input", "Enter");
+    await page.waitForFunction(() => {
+      const cs = document.querySelectorAll(".turn")[3]?.querySelectorAll(".card");
+      return cs && cs.length === 3 && [...cs].every((c) =>
+        c.querySelector(".status.busy") && c.querySelector(".body").textContent.includes("FINAL-TAIL"));
+    }, null, { timeout: 6000 });
+    await doneAll(12);
+  });
+
   await test("ui reload keeps the thread and does not re-ask", async () => {
     await page.reload();
     await page.waitForSelector(".turn");
-    assert(await page.locator(".turn").count() === 3, "turns after reload");
+    assert(await page.locator(".turn").count() === 4, "turns after reload");
     await page.waitForTimeout(1500);
-    assert(await userMsgs("chatgpt") === 3, "reload re-sent a prompt");
+    assert(await userMsgs("chatgpt") === 4, "reload re-sent a prompt");
   });
 
   await test("ui New chat starts fresh conversations", async () => {
