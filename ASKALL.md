@@ -57,6 +57,13 @@ That opens `src/askall/ask.html`: answers side by side, streaming as they're wri
 follow-up box (same conversations) and **New chat**. Pick sites with the chips at the top.
 It runs jobs inside the extension, so it works without the daemon.
 
+**History.** Every multichat is saved in the extension's local storage and listed in the left
+sidebar (☰ toggles it), grouped by day, searchable across prompts and answers. Click one to
+reopen it; a follow-up continues the same ChatGPT/Gemini/Claude conversations, because each
+site's conversation URL is saved and the bridge sends the tab back there if it has moved on.
+The open thread is in the URL (`ask.html#t=<id>`), so reload, back/forward and bookmarks
+work. Deleting from the sidebar only removes askall's copy; the site conversations stay.
+
 `askall reload` reloads the unpacked extension after you edit its files (no trip to
 chrome://extensions). The daemon runs as a systemd user service: `~/.config/systemd/user/askall.service`.
 

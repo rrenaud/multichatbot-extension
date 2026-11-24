@@ -430,6 +430,61 @@ async function suiteUi({ ctx, extId }) {
     await doneAll(3);
     assert(await userMsgs("chatgpt") === 1, "chatgpt tab should be a new chat with one prompt");
   });
+
+  const titles = () => page.$$eval(".h-item .h-title", (els) => els.map((e) => e.textContent));
+  await test("ui history lists both multichats, newest first", async () => {
+    await page.waitForFunction(() => document.querySelectorAll(".h-item").length === 2, null, { timeout: 5000 });
+    const t = await titles();
+    assert(t[0] === "Reply with exactly AGAIN" && t[1] === `Reply with exactly ${n}`, JSON.stringify(t));
+    assert(await page.locator('.h-item[aria-current="page"] .h-title').textContent() === t[0], "current thread not marked");
+  });
+
+  await test("ui reopening a past multichat shows it and continues its site conversations", async () => {
+    await page.click(".h-item:nth-child(3) .h-link"); // [h2 group, AGAIN, first]
+    await page.waitForFunction(() => document.querySelectorAll(".turn").length === 4, null, { timeout: 5000 });
+    assert(/#t=/.test(page.url()), "thread id should be in the URL: " + page.url());
+    assert(await page.locator(".turn .prompt").first().textContent() === `Reply with exactly ${n}`, "wrong thread");
+    // every site's tab is now on the AGAIN conversation; the follow-up must go back to the first one
+    await page.fill("#input", `Reply with exactly BACK-${n}`);
+    await page.press("#input", "Enter");
+    await doneAll(15);
+    const bodies = await page.$$eval(".turn:last-of-type .card .body:not(.error)", (bs) => bs.map((b) => b.textContent.trim()));
+    assert(bodies.length === 3 && bodies.every((b) => b === `BACK-${n}`), JSON.stringify(bodies));
+    for (const site of ["chatgpt", "gemini", "claude"]) {
+      assert(await userMsgs(site) === 5, `${site} tab should be back in the first conversation (4 old + 1 new prompts), has ${await userMsgs(site)}`);
+    }
+    assert((await titles())[0] === `Reply with exactly ${n}`, "follow-up should move the thread to the top");
+  });
+
+  await test("ui history survives closing the page, and search filters it", async () => {
+    const p2 = await ctx.newPage();
+    await p2.goto(`chrome-extension://${extId}/src/askall/ask.html`);
+    await p2.waitForFunction(() => document.querySelectorAll(".h-item").length === 2, null, { timeout: 5000 });
+    assert(await p2.locator(".turn").count() === 0, "a fresh page should start empty");
+    await p2.fill("#search", "BACK-");  // matches a later turn of the first thread only
+    await p2.waitForFunction(() => document.querySelectorAll(".h-item").length === 1, null, { timeout: 3000 });
+    await p2.fill("#search", "zzz-nothing");
+    await p2.waitForFunction(() => document.querySelectorAll(".h-item").length === 0 && !document.getElementById("historyEmpty").hidden, null, { timeout: 3000 });
+    // reload with the thread's hash reopens it
+    await p2.goto(page.url());
+    await p2.waitForFunction(() => document.querySelectorAll(".turn").length === 5, null, { timeout: 5000 });
+    await p2.close();
+  });
+
+  await test("ui delete asks first, then removes the thread from history and storage", async () => {
+    const item = page.locator(".h-item", { hasText: "Reply with exactly AGAIN" });
+    await item.hover();
+    await item.locator(".h-del").click();
+    await item.locator(".h-confirm .no").click();
+    assert(await page.locator(".h-item").count() === 2, "Keep should keep it");
+    await item.hover();
+    await item.locator(".h-del").click();
+    await item.locator(".h-confirm .yes").click();
+    await page.waitForFunction(() => document.querySelectorAll(".h-item").length === 1, null, { timeout: 3000 });
+    const keys = await page.evaluate(() => chrome.storage.local.get(null).then((o) => Object.keys(o).filter((k) => k.startsWith("askall-h:")).length));
+    assert(keys === 1, "storage keys: " + keys);
+    assert(await page.locator(".turn").count() === 5, "deleting another thread must not touch the open one");
+  });
 }
 
 const SUITES = { m0: suiteM0, m1: suiteM1, bridge: suiteBridge, ui: suiteUi };

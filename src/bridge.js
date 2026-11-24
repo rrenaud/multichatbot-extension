@@ -127,7 +127,9 @@ chrome.omnibox.onInputEntered.addListener(async (text, disposition) => {
 });
 
 // The ask page talks to us over a long-lived port:
-//   page → sw  {type:"ask", id, prompt, sites, newChat} | {type:"ping"} | {type:"focus", tabId}
+//   page → sw  {type:"ask", id, prompt, sites, newChat, urls?} | {type:"ping"} | {type:"focus", tabId?, url?}
+//              urls: {site: conversation URL} to continue (reopened history threads); focus with a
+//              url opens that conversation when the tab is gone or has moved on
 //   sw → page  {type:"progress", id, site, state, text?, tabId} | {type:"result", id, results}
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== "askall-ui") return;
@@ -141,14 +143,23 @@ chrome.runtime.onConnect.addListener((port) => {
         if (msg.type === "ask") {
             runJob({ ...msg, timeoutMs: msg.timeoutMs || 600000 }, emit).catch((e) =>
                 emit({ type: "result", id: msg.id, error: "bridge_error: " + (e && e.message) }));
-        } else if (msg.type === "focus" && msg.tabId) {
-            chrome.tabs.update(msg.tabId, { active: true })
-                .then((t) => chrome.windows.update(t.windowId, { focused: true }))
-                .catch(() => {});
+        } else if (msg.type === "focus") {
+            focusConversation(msg.tabId, msg.url).catch(() => {});
         }
         // "ping" just keeps the service worker awake while answers stream in
     });
 });
+
+/** Show the tab if it still holds the conversation, else open the conversation in a new tab. */
+async function focusConversation(tabId, url) {
+    const tab = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null;
+    if (tab && (!url || samePage(tab.url, url))) {
+        await chrome.tabs.update(tab.id, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+    } else if (url && siteForUrl(url)) {
+        await chrome.tabs.create({ url, active: true });
+    }
+}
 //!SECTION
 
 // SECTION - jobs
@@ -161,10 +172,11 @@ async function runJob(job, emit) {
         timeoutMs: job.timeoutMs || S.DEFAULTS.timeoutMs,
         activate: !!job.activate,
     };
+    const urls = job.urls || {};
     console.log(LOG, "job", id, sites, opts);
 
     const settled = await Promise.allSettled(
-        sites.map((site) => enqueue(site, () => runSite(id, site, prompt, opts, emit)))
+        sites.map((site) => enqueue(site, () => runSite(id, site, prompt, { ...opts, url: urls[site] }, emit)))
     );
     const results = {};
     sites.forEach((site, i) => {
@@ -189,15 +201,18 @@ async function runSite(id, site, prompt, opts, emit) {
     const fail = (error, stage, extra = {}) => ({ ok: false, error, stage, partial: "", ...extra });
     if (!cfg) return fail("unknown_site", "setup", { detail: `known: ${Object.keys(S.SITES).join(", ")}` });
 
-    // 1. find or open a tab
+    // 1. find or open a tab. Continuing a known conversation (opts.url) goes back to it if the
+    // tab has moved on — e.g. a thread reopened from the askall history.
+    const target = opts.newChat ? cfg.newChatUrl
+        : opts.url && siteForUrl(opts.url) === site ? opts.url : null;
     let tab = await findTab(site, cfg);
     if (!tab) {
         const loaded = waitForLoad(null);
-        tab = await chrome.tabs.create({ url: cfg.newChatUrl, active: false });
+        tab = await chrome.tabs.create({ url: target || cfg.newChatUrl, active: false });
         await loaded.forTab(tab.id);
-    } else if (opts.newChat) {
+    } else if (target && (opts.newChat || !samePage(tab.url, target))) {
         const loaded = waitForLoad(tab.id);
-        await chrome.tabs.update(tab.id, { url: cfg.newChatUrl });
+        await chrome.tabs.update(tab.id, { url: target });
         await loaded.forTab(tab.id);
     } else if (tab.discarded || tab.status !== "complete") {
         const loaded = waitForLoad(tab.id);
@@ -238,6 +253,21 @@ async function runSite(id, site, prompt, opts, emit) {
     } finally {
         inflight.delete(reqId);
     }
+}
+
+/** Same origin + path (conversation ids live in the path on all three sites). */
+function samePage(a, b) {
+    try {
+        const x = new URL(a), y = new URL(b);
+        return x.origin === y.origin && x.pathname.replace(/\/$/, "") === y.pathname.replace(/\/$/, "");
+    } catch (_) { return false; }
+}
+
+/** Which supported site a URL belongs to (null for anything else: we only ever navigate to those). */
+function siteForUrl(url) {
+    let host;
+    try { host = new URL(url).hostname; } catch (_) { return null; }
+    return url.startsWith("https://") ? S.siteKeyForHost(host) : null;
 }
 
 /** Prefer the tab we used last time for this site (matters for --continue), else the most recently used one. */

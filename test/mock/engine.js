@@ -76,12 +76,35 @@
     updateBtn();
   }
 
-  async function respond(prompt) {
+  // Conversations get their own URL after the first prompt, like the real sites, and are kept
+  // in localStorage so reopening that URL shows them again (askall history resumes them).
+  const CONV = { chatgpt: "/c/", gemini: "/app/", claude: "/chat/" }[SITE];
+  const key = () => "mock-conv:" + location.pathname;
+  const saved = () => JSON.parse(localStorage.getItem(key()) || "[]");
+  function addUser(prompt) {
     const user = document.createElement("div");
     if (SITE === "chatgpt") user.setAttribute("data-message-author-role", "user");
     user.className = "user-msg";
     user.textContent = prompt;
     thread.appendChild(user);
+  }
+  function record(prompt, html) {
+    if (!location.pathname.startsWith(CONV) || location.pathname.length <= CONV.length) {
+      history.pushState(null, "", CONV + Math.random().toString(36).slice(2, 10));
+    }
+    const conv = saved();
+    conv.push({ prompt, html });
+    localStorage.setItem(key(), JSON.stringify(conv));
+  }
+  for (const m of saved()) {
+    addUser(m.prompt);
+    const { wrap, content } = makeNode();
+    content.innerHTML = m.html;
+    if (SITE === "claude") wrap.setAttribute("data-is-streaming", "false");
+  }
+
+  async function respond(prompt) {
+    addUser(prompt);
     if (/NEVER/.test(prompt)) return;
 
     setGenerating(true);
@@ -125,6 +148,7 @@
     }
     if (/LINGER/.test(prompt)) await sleep(8000); // text is done but the stop button stays up (Gemini does this)
     if (SITE === "claude") wrap.setAttribute("data-is-streaming", "false");
+    record(prompt, content.innerHTML);
     setGenerating(false);
   }
 

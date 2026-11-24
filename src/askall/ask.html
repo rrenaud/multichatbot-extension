@@ -9,17 +9,30 @@
     <link rel="stylesheet" href="ask.css">
 </head>
 <body>
+    <aside id="side" class="side" aria-label="History">
+        <div class="side-top">
+            <div class="brand">askall</div>
+            <button id="newChat" class="ghost" title="Start fresh conversations on every site">New chat</button>
+        </div>
+        <input id="search" class="search" type="search" placeholder="Search history" aria-label="Search history">
+        <nav id="history" class="history"></nav>
+        <p id="historyEmpty" class="history-empty">Your multichats will be listed here.</p>
+    </aside>
+    <div id="scrim" class="scrim"></div>
+
+    <div class="main">
     <header class="top">
-        <div class="brand">askall</div>
+        <button id="toggleSide" class="icon" title="Show or hide history" aria-controls="side" aria-expanded="true">
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
         <div id="sites" class="sites" role="group" aria-label="Sites to ask"></div>
-        <button id="newChat" class="ghost" title="Start fresh conversations on every site">New chat</button>
     </header>
 
     <main id="thread" class="thread">
         <section id="empty" class="empty">
             <h1>Ask every chatbot at once</h1>
             <p>Type below, or from any tab's address bar type <kbd>ask</kbd> <kbd>Space</kbd> then your question.</p>
-            <p class="hint">Answers come from your logged-in tabs. Follow-ups stay in the same conversations until you press <em>New chat</em>.</p>
+            <p class="hint">Answers come from your logged-in tabs. Follow-ups stay in the same conversations until you press <em>New chat</em>. Past multichats are in the sidebar; reopen one to keep going.</p>
         </section>
     </main>
 
@@ -27,6 +40,7 @@
         <textarea id="input" rows="1" placeholder="Ask ChatGPT, Gemini and Claude…" autofocus></textarea>
         <button id="send" type="submit">Ask</button>
     </form>
+    </div>
 
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/katex/katex.min.js"></script>
